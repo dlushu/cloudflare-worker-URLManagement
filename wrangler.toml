@@ -1,5 +1,5 @@
 # wrangler.toml
-name = 'cloudflare-worker-urlManagement'
+name = 'cloudflare-worker-urlmanagement'
 main = "_worker.js"
 compatibility_date = "2026-4-10"
 keep_vars = true
