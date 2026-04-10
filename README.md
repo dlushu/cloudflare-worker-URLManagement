@@ -1,10 +1,12 @@
-# 🔗 URL 管理与短链接使用说明
+# 🔗 URL 管理与短链接
 
-这是一个简单的短链接工具，你可以：
+一个基于 Cloudflare Workers 的简单短链接工具，支持：
 
-* 添加短链接
-* 访问短链接自动跳转
-* 在网页里管理和删除链接
+* 登录管理
+* 添加 / 更新短链接（Webhook）
+* 删除短链接
+* 短链跳转（支持路径拼接）
+* 管理页面可视化操作
 
 ---
 
@@ -24,14 +26,12 @@
 
 ### 1️⃣ 创建 Worker
 
-进入 Cloudflare：
-
-1. 打开 **Workers & Pages**
+1. 打开 Cloudflare → **Workers & Pages**
 2. 点击 **创建 Worker**
 3. 删除默认代码
-4. 把项目里的：
+4. 把项目中的：
 
-```id="t3yq5l"
+```id="7f5s3d"
 _worker.js
 ```
 
@@ -45,7 +45,7 @@ _worker.js
 1. 进入 **KV（键值存储）**
 2. 创建命名空间：
 
-```id="q8wqv9"
+```id="p6u3wr"
 LINKS_KV
 ```
 
@@ -58,7 +58,7 @@ LINKS_KV
 * 添加绑定
 * 变量名填写：
 
-```id="x9q3sz"
+```id="k2m9cs"
 LINKS_KV
 ```
 
@@ -66,11 +66,11 @@ LINKS_KV
 
 ---
 
-### 4️⃣ 设置密码
+### 4️⃣ 设置管理员密码
 
 在 Worker → 设置 → 变量 中添加：
 
-```id="y2d7fu"
+```id="z4v2hx"
 ADMIN_PASSWORD = 你的密码
 ```
 
@@ -78,9 +78,7 @@ ADMIN_PASSWORD = 你的密码
 
 ### 5️⃣ 访问使用
 
-打开：
-
-```id="4r3tdj"
+```id="6u9b1x"
 https://你的域名/
 ```
 
@@ -88,7 +86,7 @@ https://你的域名/
 
 ## 📌 一、如何登录
 
-进入首页后输入密码即可。
+打开首页后输入密码即可进入管理页面。
 
 ---
 
@@ -96,13 +94,13 @@ https://你的域名/
 
 ### 接口：
 
-```id="h4vdbb"
+```id="9h8n4a"
 POST /webhook
 ```
 
 ### 示例：
 
-```bash id="4m9bgs"
+```bash id="g2v7ka"
 curl -X POST https://你的域名/webhook \
   -H "Content-Type: application/json" \
   -d '{"name":"test","url":"https://example.com"}'
@@ -110,17 +108,26 @@ curl -X POST https://你的域名/webhook \
 
 ---
 
+### 参数说明：
+
+| 参数   | 说明   |
+| ---- | ---- |
+| name | 短链名称 |
+| url  | 跳转地址 |
+
+---
+
 ### 使用效果：
 
 访问：
 
-```id="j1r9d9"
+```id="q8d4zs"
 https://你的域名/test
 ```
 
 → 跳转到：
 
-```id="7zk3s1"
+```id="c3p7hf"
 https://example.com
 ```
 
@@ -130,7 +137,7 @@ https://example.com
 
 直接访问：
 
-```id="phx2r6"
+```id="x6f2ke"
 https://你的域名/短链名称
 ```
 
@@ -140,19 +147,19 @@ https://你的域名/短链名称
 
 例如：
 
-```id="zk3vlj"
+```id="r5b8ut"
 github → https://github.com
 ```
 
 访问：
 
-```id="g6s9u1"
+```id="m4n7vy"
 https://你的域名/github/user/repo
 ```
 
 → 自动跳转：
 
-```id="0d8q2q"
+```id="a9k3pe"
 https://github.com/user/repo
 ```
 
@@ -160,7 +167,7 @@ https://github.com/user/repo
 
 ### ✅ 支持参数
 
-```id="f0e4vx"
+```id="t7c2md"
 https://你的域名/google?q=1
 ```
 
@@ -181,7 +188,7 @@ https://你的域名/google?q=1
 
 打开：
 
-```id="8lbw5v"
+```id="y2j6qx"
 https://你的域名/
 ```
 
@@ -189,33 +196,118 @@ https://你的域名/
 
 ---
 
-## 📌 六、KV 是干嘛的（简单理解）
+## 📌 六、KV 是什么（必须了解）
 
-KV 用来存数据：
+KV 用来存你的短链接数据：
 
-```id="1o8t5w"
+```id="n3v8zd"
 短链名 → 真实网址
 ```
 
 例如：
 
-```id="p9z1f4"
+```id="p9c4rt"
 google → https://google.com
+```
+
+👉 所有短链都存这里
+
+---
+
+## 📌 七、使用场景
+
+### 🔧 场景 1：Lucky + STUN 内网穿透（强烈推荐）
+
+在使用 Lucky 的 STUN 内网穿透时：
+
+```id="h2q7vx"
+http://公网IP:端口
+```
+
+问题：
+
+* IP 会变
+* 端口会变
+* 很难记
+
+---
+
+### ✅ 解决方案
+
+设置短链：
+
+```id="w5k9ds"
+home → http://当前IP:端口
+```
+
+更新：
+
+```bash id="z8m3yf"
+curl -X POST https://你的域名/webhook \
+  -H "Content-Type: application/json" \
+  -d '{"name":"home","url":"http://最新IP:端口"}'
 ```
 
 ---
 
-## 📌 七、常见问题
+### 🚀 使用效果
 
-### ❓ 忘了复制 `_worker.js`
+你只需要访问：
 
-👉 Worker 没有功能（必须用这个文件）
+```id="d7r2nc"
+https://你的域名/home
+```
+
+自动跳转到最新地址。
 
 ---
 
+👉 优点：
+
+* 不需要记 IP
+* 不怕端口变化
+* 适合 HTTP 服务
+
+---
+
+### 🌐 场景 2：临时地址
+
+```id="q3x9bd"
+test → http://临时地址
+```
+
+随时更新，不影响访问入口。
+
+---
+
+### 📱 场景 3：常用网址快捷入口
+
+```id="m1v8ka"
+ai → https://chat.openai.com
+nas → http://192.168.1.2:5000
+```
+
+---
+
+### 🔁 场景 4：路径透传
+
+```id="u9c2qp"
+github → https://github.com
+```
+
+访问：
+
+```id="b7d4rs"
+/github/user/repo
+```
+
+---
+
+## 📌 八、常见问题
+
 ### ❓ 没创建 KV
 
-👉 功能全部不可用
+👉 功能无法使用（必须创建）
 
 ---
 
@@ -223,15 +315,21 @@ google → https://google.com
 
 必须是：
 
-```id="7f0ycm"
+```id="j6n4xe"
 LINKS_KV
 ```
 
 ---
 
+### ❓ 忘了使用 `_worker.js`
+
+👉 Worker 不会正常工作
+
+---
+
 ### ❓ 打不开短链
 
-```id="n6g1x3"
+```id="k3p8zw"
 404 Not Found
 ```
 
@@ -245,9 +343,10 @@ LINKS_KV
 
 ---
 
-## 📌 八、适合用来干嘛
+## 📌 九、适合用来干嘛
 
 * 自用短链
+* 内网穿透入口
 * 常用网址管理
-* 分享短链接
-* 自动跳转
+* 动态地址跳转
+* API 自动更新跳转
