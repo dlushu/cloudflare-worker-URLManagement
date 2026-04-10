@@ -1,168 +1,221 @@
 export default {
   async fetch(request, env) {
-    const url = new URL(request.url);
+    try {
+      const url = new URL(request.url);
+      
+      // 添加请求日志
+      console.log('Request:', request.method, url.pathname);
 
-    // =====================
-    // 🔐 登录
-    // =====================
-    if (url.pathname === '/login' && request.method === 'POST') {
-      const { password } = await request.json();
-
-      if (password === env.ADMIN_PASSWORD) {
-        return new Response(JSON.stringify({ success: true }), {
-          headers: {
-            'Set-Cookie': `auth=${password}; Path=/; Max-Age=604800`,
-            'Content-Type': 'application/json'
+      // =====================
+      // 🔐 登录
+      // =====================
+      if (url.pathname === '/login' && request.method === 'POST') {
+        try {
+          const { password } = await request.json();
+          
+          if (password === env.ADMIN_PASSWORD) {
+            return new Response(JSON.stringify({ success: true }), {
+              headers: {
+                'Set-Cookie': `auth=${password}; Path=/; Max-Age=604800`,
+                'Content-Type': 'application/json'
+              }
+            });
           }
-        });
-      }
-      return new Response('Unauthorized', { status: 401 });
-    }
-
-    // =====================
-    // 🔗 Webhook（添加/更新）
-    // =====================
-    if (url.pathname === '/webhook' && request.method === 'POST') {
-      let body;
-      try {
-        body = await request.json();
-      } catch {
-        return new Response('Invalid JSON', { status: 400 });
+          return new Response('Unauthorized', { status: 401 });
+        } catch (e) {
+          console.error('Login error:', e);
+          return new Response('Login error', { status: 500 });
+        }
       }
 
-      const { name, url: target } = body;
+      // =====================
+      // 🔗 Webhook（添加/更新）
+      // =====================
+      if (url.pathname === '/webhook' && request.method === 'POST') {
+        try {
+          let body;
+          try {
+            body = await request.json();
+          } catch {
+            return new Response('Invalid JSON', { status: 400 });
+          }
 
-      if (!name || !target) {
-        return new Response('Missing name or url', { status: 400 });
+          const { name, url: target } = body;
+
+          if (!name || !target) {
+            return new Response('Missing name or url', { status: 400 });
+          }
+
+          console.log('Adding webhook:', name, target);
+          
+          const exist = await env.LINKS_KV.get(name);
+          await env.LINKS_KV.put(name, target);
+
+          return new Response(JSON.stringify({
+            success: true,
+            isUpdate: !!exist
+          }), {
+            headers: { 'Content-Type': 'application/json' }
+          });
+        } catch (e) {
+          console.error('Webhook error:', e);
+          return new Response(JSON.stringify({ error: e.message }), { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          });
+        }
       }
 
-      const exist = await env.LINKS_KV.get(name);
-      await env.LINKS_KV.put(name, target);
+      // =====================
+      // 🗑 删除
+      // =====================
+      if (url.pathname === '/delete' && request.method === 'POST') {
+        try {
+          const cookie = request.headers.get('Cookie') || '';
+          if (!cookie.includes(`auth=${env.ADMIN_PASSWORD}`)) {
+            return new Response('Unauthorized', { status: 401 });
+          }
 
+          const { name } = await request.json();
+          console.log('Deleting:', name);
+          
+          await env.LINKS_KV.delete(name);
+
+          return new Response(JSON.stringify({ success: true }));
+        } catch (e) {
+          console.error('Delete error:', e);
+          return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+        }
+      }
+
+      // =====================
+      // 🔐 登录判断
+      // =====================
+      const cookie = request.headers.get('Cookie') || '';
+      const isAuth = cookie.includes(`auth=${env.ADMIN_PASSWORD}`);
+
+      // =====================
+      // 📄 首页（列表）
+      // =====================
+      if (url.pathname === '/' || url.pathname === '') {
+        try {
+          if (!isAuth) {
+            return new Response(loginPage(), {
+              headers: { 'Content-Type': 'text/html;charset=utf-8' }
+            });
+          }
+
+          console.log('Fetching KV list...');
+          const list = await env.LINKS_KV.list();
+          const links = [];
+
+          for (const key of list.keys) {
+            const val = await env.LINKS_KV.get(key.name);
+            links.push([key.name, val]);
+          }
+          
+          console.log(`Found ${links.length} links`);
+
+          return new Response(generatePage(links, request.url), {
+            headers: { 'Content-Type': 'text/html;charset=utf-8' }
+          });
+        } catch (e) {
+          console.error('Home page error:', e);
+          return new Response(`Error: ${e.message}`, { status: 500 });
+        }
+      }
+
+      // =====================
+      // 📦 PWA
+      // =====================
+      if (url.pathname === '/manifest.json') {
+        return new Response(JSON.stringify({
+          name: "URL管理",
+          short_name: "URL管理",
+          start_url: "/",
+          display: "standalone",
+          background_color: "#ffffff",
+          theme_color: "#4CAF50"
+        }), { headers: { 'Content-Type': 'application/json' } });
+      }
+
+      if (url.pathname === '/sw.js') {
+        return new Response('', { status: 404 });
+      }
+
+      // =====================
+      // 🔗 短链跳转（核心）
+      // =====================
+      if (request.method === 'GET') {
+        try {
+          let fullPath = url.pathname.slice(1);
+
+          let decoded;
+          try {
+            decoded = decodeURIComponent(fullPath);
+          } catch {
+            decoded = fullPath;
+          }
+
+          console.log('Looking up:', decoded);
+          
+          let target = await env.LINKS_KV.get(decoded);
+          let suffix = '';
+
+          if (!target) {
+            const parts = decoded.split('/');
+
+            for (let i = parts.length - 1; i > 0; i--) {
+              const prefix = parts.slice(0, i).join('/');
+              const match = await env.LINKS_KV.get(prefix);
+
+              if (match) {
+                target = match;
+                suffix = '/' + parts.slice(i).join('/');
+                break;
+              }
+            }
+          }
+
+          if (!target) {
+            console.log('Not found:', decoded);
+            return new Response('Not Found', { status: 404 });
+          }
+
+          let final = target;
+
+          if (suffix) {
+            if (final.endsWith('/') && suffix.startsWith('/')) {
+              final = final.slice(0, -1) + suffix;
+            } else {
+              final += suffix;
+            }
+          }
+
+          if (url.search) {
+            final += (final.includes('?') ? '&' : '?') + url.search.slice(1);
+          }
+
+          console.log('Redirecting to:', final);
+          return Response.redirect(final, 307);
+        } catch (e) {
+          console.error('Redirect error:', e);
+          return new Response(`Redirect error: ${e.message}`, { status: 500 });
+        }
+      }
+
+      return new Response('Method not allowed', { status: 405 });
+    } catch (error) {
+      // 全局错误捕获
+      console.error('Global error:', error);
       return new Response(JSON.stringify({
-        success: true,
-        isUpdate: !!exist
-      }), {
+        error: error.message,
+        stack: error.stack
+      }), { 
+        status: 500,
         headers: { 'Content-Type': 'application/json' }
       });
     }
-
-    // =====================
-    // 🗑 删除
-    // =====================
-    if (url.pathname === '/delete' && request.method === 'POST') {
-      const cookie = request.headers.get('Cookie') || '';
-      if (!cookie.includes(`auth=${env.ADMIN_PASSWORD}`)) {
-        return new Response('Unauthorized', { status: 401 });
-      }
-
-      const { name } = await request.json();
-      await env.LINKS_KV.delete(name);
-
-      return new Response(JSON.stringify({ success: true }));
-    }
-
-    // =====================
-    // 🔐 登录判断
-    // =====================
-    const cookie = request.headers.get('Cookie') || '';
-    const isAuth = cookie.includes(`auth=${env.ADMIN_PASSWORD}`);
-
-    // =====================
-    // 📄 首页（列表）
-    // =====================
-    if (url.pathname === '/' || url.pathname === '') {
-      if (!isAuth) {
-        return new Response(loginPage(), {
-          headers: { 'Content-Type': 'text/html;charset=utf-8' }
-        });
-      }
-
-      const list = await env.LINKS_KV.list();
-      const links = [];
-
-      for (const key of list.keys) {
-        const val = await env.LINKS_KV.get(key.name);
-        links.push([key.name, val]);
-      }
-
-      return new Response(generatePage(links, request.url), {
-        headers: { 'Content-Type': 'text/html;charset=utf-8' }
-      });
-    }
-
-    // =====================
-    // 📦 PWA（只保留 manifest，移除 Service Worker）
-    // =====================
-    if (url.pathname === '/manifest.json') {
-      return new Response(JSON.stringify({
-        name: "URL管理",
-        short_name: "URL管理",
-        start_url: "/",
-        display: "standalone",
-        background_color: "#ffffff",
-        theme_color: "#4CAF50"
-      }), { headers: { 'Content-Type': 'application/json' } });
-    }
-
-    // 不再提供 sw.js，避免缓存
-    if (url.pathname === '/sw.js') {
-      return new Response('', { status: 404 });
-    }
-
-    // =====================
-    // 🔗 短链跳转（核心）
-    // =====================
-    if (request.method === 'GET') {
-      let fullPath = url.pathname.slice(1);
-
-      let decoded;
-      try {
-        decoded = decodeURIComponent(fullPath);
-      } catch {
-        decoded = fullPath;
-      }
-
-      let target = await env.LINKS_KV.get(decoded);
-      let suffix = '';
-
-      if (!target) {
-        const parts = decoded.split('/');
-
-        for (let i = parts.length - 1; i > 0; i--) {
-          const prefix = parts.slice(0, i).join('/');
-          const match = await env.LINKS_KV.get(prefix);
-
-          if (match) {
-            target = match;
-            suffix = '/' + parts.slice(i).join('/');
-            break;
-          }
-        }
-      }
-
-      if (!target) {
-        return new Response('Not Found', { status: 404 });
-      }
-
-      let final = target;
-
-      if (suffix) {
-        if (final.endsWith('/') && suffix.startsWith('/')) {
-          final = final.slice(0, -1) + suffix;
-        } else {
-          final += suffix;
-        }
-      }
-
-      if (url.search) {
-        final += (final.includes('?') ? '&' : '?') + url.search.slice(1);
-      }
-
-      return Response.redirect(final, 307);
-    }
-
-    return new Response('Method not allowed', { status: 405 });
   }
 };
 
