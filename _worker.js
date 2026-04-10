@@ -144,9 +144,12 @@ export default {
       }
 
       // =====================
-      // 🔗 短链跳转（核心）
+      // 🔗 短链跳转（支持所有 HTTP 方法，像 Cloudflare 原生规则一样）
       // =====================
-      if (request.method === 'GET') {
+      // 只要不是 API 路由，都尝试跳转
+      const isApiRoute = ['/login', '/webhook', '/delete', '/manifest.json', '/sw.js'].includes(url.pathname);
+      
+      if (!isApiRoute) {
         try {
           let fullPath = url.pathname.slice(1);
 
@@ -157,7 +160,7 @@ export default {
             decoded = fullPath;
           }
 
-          console.log('Looking up:', decoded);
+          console.log('Looking up:', decoded, 'Method:', request.method);
           
           let target = await env.LINKS_KV.get(decoded);
           let suffix = '';
@@ -196,15 +199,20 @@ export default {
             final += (final.includes('?') ? '&' : '?') + url.search.slice(1);
           }
 
-          console.log('Redirecting to:', final);
+          console.log('Redirecting to:', final, 'Method:', request.method);
+          
+          // 使用 307 保留原始请求方法和请求体，最像 Cloudflare 原生规则
           return Response.redirect(final, 307);
+          
         } catch (e) {
           console.error('Redirect error:', e);
           return new Response(`Redirect error: ${e.message}`, { status: 500 });
         }
       }
 
-      return new Response('Method not allowed', { status: 405 });
+      // 如果都不是以上路由，返回 404
+      return new Response('Not Found', { status: 404 });
+      
     } catch (error) {
       // 全局错误捕获
       console.error('Global error:', error);
@@ -429,21 +437,18 @@ function generatePage(links, requestUrl) {
       background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
       min-height: 100vh;
       padding: 20px;
-      /* 完整的安全区域适配 */
       padding-top: max(20px, env(safe-area-inset-top));
       padding-bottom: max(20px, env(safe-area-inset-bottom));
       padding-left: max(20px, env(safe-area-inset-left));
       padding-right: max(20px, env(safe-area-inset-right));
     }
     
-    /* 针对 iOS 刘海屏和动态岛的专门优化 */
     @supports (padding-top: env(safe-area-inset-top)) {
       body {
         padding-top: calc(env(safe-area-inset-top) + 10px);
       }
     }
     
-    /* 针对全面屏手机的额外处理 */
     @media (display: standalone) {
       body {
         padding-top: calc(env(safe-area-inset-top) + 10px);
@@ -459,7 +464,6 @@ function generatePage(links, requestUrl) {
       margin: 0 auto;
     }
     
-    /* 头部区域 - 确保不被状态栏遮挡 */
     .header {
       background: white;
       border-radius: 24px;
@@ -471,7 +475,6 @@ function generatePage(links, requestUrl) {
       align-items: center;
       flex-wrap: wrap;
       gap: 16px;
-      /* 确保内容区域安全 */
       position: relative;
       z-index: 1;
     }
@@ -523,7 +526,6 @@ function generatePage(links, requestUrl) {
       transform: scale(1.1);
     }
     
-    /* 卡片网格 */
     .links-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
@@ -555,7 +557,6 @@ function generatePage(links, requestUrl) {
       }
     }
     
-    /* 卡片内容 */
     .card-name {
       display: flex;
       align-items: center;
@@ -607,7 +608,6 @@ function generatePage(links, requestUrl) {
       word-break: break-all;
     }
     
-    /* 按钮组 - 强制并排一行 */
     .button-group {
       display: flex;
       flex-wrap: nowrap;
@@ -669,11 +669,9 @@ function generatePage(links, requestUrl) {
       margin-bottom: 16px;
     }
     
-    /* 响应式：小屏幕时允许横向滚动 */
     @media (max-width: 640px) {
       body {
         padding: 12px;
-        /* 小屏幕也要保持安全区域 */
         padding-top: max(12px, env(safe-area-inset-top));
         padding-bottom: max(12px, env(safe-area-inset-bottom));
       }
@@ -698,7 +696,6 @@ function generatePage(links, requestUrl) {
       }
     }
     
-    /* 滚动条美化 */
     ::-webkit-scrollbar {
       width: 8px;
       height: 8px;
@@ -749,16 +746,13 @@ function generatePage(links, requestUrl) {
           headers: { 'Content-Type': 'application/json' }
         });
         if (r.ok) {
-          // 直接从 DOM 移除卡片
           cardElement.remove();
           showToast('🗑 已删除');
           
-          // 更新统计数字
           const statsSpan = document.querySelector('.stats');
           const currentCount = parseInt(statsSpan.textContent.match(/\\d+/)?.[0] || 0);
           statsSpan.innerHTML = statsSpan.innerHTML.replace(/\\d+/, currentCount - 1);
           
-          // 如果没有链接了，重新加载显示空状态
           if (document.querySelectorAll('.card').length === 0) {
             location.reload();
           }
@@ -822,7 +816,6 @@ function generatePage(links, requestUrl) {
   </div>
   <div id="toast" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#333;color:white;padding:10px 20px;border-radius:40px;font-size:14px;z-index:9999;opacity:0;transition:opacity0.3s;pointer-events:none"></div>
   <script>
-    // 不再注册 Service Worker，避免缓存问题
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(function(registrations) {
         for(let registration of registrations) {
@@ -831,7 +824,6 @@ function generatePage(links, requestUrl) {
       });
     }
     
-    // 检测是否在独立应用中运行，动态调整样式
     if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
       document.body.style.paddingTop = 'calc(env(safe-area-inset-top) + 10px)';
     }
